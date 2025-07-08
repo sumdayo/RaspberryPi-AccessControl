@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ユーザー管理</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2 { color: #0056b3; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        form { margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }
+        form input[type="text"], form input[type="submit"] { padding: 8px; margin-right: 10px; border-radius: 4px; border: 1px solid #ddd; }
+        form input[type="submit"] { background-color: #28a745; color: white; cursor: pointer; border: none; }
+        form input[type="submit"]:hover { background-color: #218838; }
+        .delete-btn { background-color: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+        .delete-btn:hover { background-color: #c82333; }
+        .nav-links { margin-bottom: 20px; }
+        .nav-links a { margin-right: 15px; text-decoration: none; color: #007bff; font-weight: bold; }
+        .nav-links a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ユーザー管理</h1>
+        <div class="nav-links">
+            <a href="/">入退室履歴</a>
+            <a href="/users">ユーザー管理</a>
+        </div>
+
+        <h2>ユーザー一覧</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>IDm</th>
+                    <th>名前</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.idm }}</td>
+                    <td>{{ user.name }}</td>
+                    <td>
+                        <form action="/users" method="post" style="display:inline;">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <input type="submit" value="削除" class="delete-btn">
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h2>新しいユーザーを追加</h2>
+        <form action="/users" method="post">
+            <input type="hidden" name="action" value="add">
+            IDm: <input type="text" name="idm" placeholder="F637CF05" required>
+            名前: <input type="text" name="name" placeholder="谷口 宗馬" required>
+            <input type="submit" value="追加">
+        </form>
+    </div>
+</body>
+</html>
