@@ -8,12 +8,13 @@ import math
 
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, timedelta
-from collections import defaultdict
+from datetime import datetime, timedelta, date # dateを追加
+from collections import defaultdict # defaultdictを追加
 
 from smartcard.System import readers
 from smartcard.util import toHexString
 import threading
+import calendar # カレンダー生成のために追加
 
 
 # --- Flaskアプリケーションの設定 ---
@@ -24,7 +25,7 @@ app.config['SECRET_KEY'] = 'your_super_secret_key_here' # 本番環境ではよ�
 
 # --- 削除操作用のパスワード設定 ---
 # !!! 重要: 本番環境ではこのパスワードを環境変数などから読み込むべきです !!!
-DELETE_PASSWORD = "souma332024" # ここを実際のパスワードに設定してください
+DELETE_PASSWORD = "your_secure_delete_password" # ここを実際のパスワードに設定してください
 
 
 db = SQLAlchemy(app)
@@ -311,6 +312,41 @@ def calculate_total_stay_time():
     logs = AccessLog.query.order_by(AccessLog.user_id, AccessLog.timestamp).all()
     return _calculate_stay_time_for_logs(logs)
 
+# --- カレンダー表示用のアクセスサマリー取得関数 ---
+def get_monthly_access_summary(year, month):
+    start_date = datetime(year, month, 1).date()
+    if month == 12:
+        end_date = datetime(year + 1, 1, 1).date()
+    else:
+        end_date = datetime(year, month + 1, 1).date()
+
+    # 該当月の全てのログを取得
+    logs = AccessLog.query.filter(
+        AccessLog.timestamp >= start_date,
+        AccessLog.timestamp < end_date
+    ).order_by(AccessLog.timestamp).all()
+
+    access_summary = defaultdict(set) # 日付ごとにアクセスしたユーザー名を格納
+    user_names_cache = {} # ユーザー名をキャッシュ
+
+    with app.app_context():
+        for log in logs:
+            log_date = log.timestamp.date()
+            if log_date >= start_date and log_date < end_date:
+                if log.user_id not in user_names_cache:
+                    user_obj = User.query.get(log.user_id)
+                    if user_obj:
+                        user_names_cache[log.user_id] = user_obj.name
+                    else:
+                        user_names_cache[log.user_id] = f"不明なユーザー (ID:{log.user_id})"
+                access_summary[log_date].add(user_names_cache[log.user_id])
+    
+    # setをlistに変換してソート
+    for date_key in access_summary:
+        access_summary[date_key] = sorted(list(access_summary[date_key]))
+
+    return access_summary
+
 
 # --- Webアプリケーションのルート定義 ---
 
@@ -318,9 +354,20 @@ def calculate_total_stay_time():
 def index():
     access_logs = AccessLog.query.order_by(AccessLog.timestamp.desc()).limit(20).all() # 最新20件
 
-    # 今月のランキング
+    # カレンダー表示用の年と月を取得
     current_year = datetime.now().year
     current_month = datetime.now().month
+    
+    # クエリパラメータから年と月を取得（カレンダーナビゲーション用）
+    calendar_year = request.args.get('calendar_year', type=int, default=current_year)
+    calendar_month = request.args.get('calendar_month', type=int, default=current_month)
+
+    # カレンダーデータ
+    cal = calendar.Calendar(firstweekday=calendar.SUNDAY) # 日曜日始まり
+    month_calendar = cal.monthdatescalendar(calendar_year, calendar_month)
+    access_summary = get_monthly_access_summary(calendar_year, calendar_month)
+
+    # 今月のランキング
     monthly_ranking = calculate_monthly_stay_time(current_year, current_month)
 
     # 今週のランキング
@@ -334,8 +381,14 @@ def index():
                            monthly_ranking=monthly_ranking,
                            weekly_ranking=weekly_ranking,
                            total_ranking=total_ranking,
-                           current_year=current_year,
-                           current_month=current_month)
+                           current_year=current_year, # 今月のランキング表示用
+                           current_month=current_month, # 今月のランキング表示用
+                           calendar_year=calendar_year, # カレンダー表示用
+                           calendar_month=calendar_month, # カレンダー表示用
+                           month_calendar=month_calendar, # カレンダーデータ
+                           access_summary=access_summary, # 日ごとのアクセスサマリー
+                           datetime=datetime # テンプレートでdatetimeオブジェクトを使用するため
+                           )
 
 @app.route('/users', methods=['GET', 'POST'])
 def manage_users():
@@ -377,9 +430,6 @@ def manage_users():
                 flash('エラー: パスワードが間違っています。', 'danger')
         return redirect(url_for('manage_users'))
 
-    users = User.query.all()
-    return render_template('users.html', users=users)
-
 @app.route('/users/edit/<int:user_id>', methods=['GET', 'POST'])
 def edit_user(user_id):
     with app.app_context():
@@ -413,7 +463,7 @@ def clear_user_logs(user_id):
         with app.app_context():
             user = User.query.get(user_id)
             if user:
-                num_deleted = AccessLog.query.filter_by(user_id=user_id).delete()
+                num_deleted = AccessLog.query.filter_by(user_id=user.id).delete()
                 db.session.commit()
                 flash(f'ユーザー "{user.name}" の入退室ログ {num_deleted} 件を削除しました。', 'success')
                 send_discord_notification(user.name, 'ログ削除', success=True, details={'deleted_count': num_deleted})
@@ -425,11 +475,6 @@ def clear_user_logs(user_id):
 
 @app.route('/ranking')
 def show_ranking():
-    # このルートは、index.htmlにランキング表示を統合するため、
-    # 今後は主に月選択による過去のランキング表示などに利用されるか、
-    # あるいは廃止される可能性があります。
-    # 現在はindexにランキング表示を統合しているため、ランキングページ自体は
-    # 以前のまま残しておきますが、必要に応じて調整してください。
     current_year = datetime.now().year
     current_month = datetime.now().month
 

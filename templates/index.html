@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IPlab入退室ログ</title>
+    <title>アクセス制御システム</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
         h1, h2 { color: #0056b3; }
@@ -48,11 +48,94 @@
         .rank-3 { background-color: #cd7f32; font-weight: bold; } /* Bronze */
         .ranking-table th, .ranking-table td { text-align: center; } /* ランキングテーブルのテキストを中央揃え */
         .ranking-table td:first-child { font-weight: bold; } /* 順位の数字を太字に */
+
+        /* カレンダー用スタイル */
+        .calendar-container {
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .calendar-header h3 {
+            margin: 0;
+            color: #0056b3;
+            font-size: 1.5em;
+        }
+        .calendar-header .nav-button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+        .calendar-header .nav-button:hover {
+            background-color: #0056b3;
+        }
+        .calendar-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed; /* カレンダーセルの幅を固定 */
+        }
+        .calendar-table th, .calendar-table td {
+            border: 1px solid #ddd;
+            padding: 5px;
+            height: 80px; /* カレンダーセルの高さを固定 */
+            vertical-align: top; /* 内容を上揃え */
+            font-size: 0.9em;
+            overflow: hidden; /* 内容がはみ出す場合隠す */
+            position: relative;
+        }
+        .calendar-table th {
+            background-color: #e9ecef;
+            color: #495057;
+            text-align: center;
+        }
+        .calendar-table td {
+            background-color: #fff;
+        }
+        .calendar-table td.today {
+            background-color: #e0ffe0; /* 今日の日付の背景色 */
+            border: 2px solid #28a745;
+        }
+        .calendar-table td.other-month {
+            background-color: #f8f9fa;
+            color: #adb5bd;
+        }
+        .calendar-day-number {
+            font-weight: bold;
+            font-size: 1.1em;
+            display: block;
+            margin-bottom: 5px;
+            color: #343a40;
+        }
+        .calendar-users {
+            font-size: 0.8em;
+            line-height: 1.2;
+            color: #007bff;
+        }
+        .calendar-users span {
+            display: block; /* ユーザー名を縦に並べる */
+            white-space: nowrap; /* 名前が改行されないように */
+            overflow: hidden; /* はみ出した名前を隠す */
+            text-overflow: ellipsis; /* はみ出した名前を...で表示 */
+        }
+        .calendar-users span:first-child {
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>IPlab入退室ログ</h1>
+        <h1>アクセス制御システム</h1>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -156,6 +239,59 @@
                     <p>今までの滞在記録はありません。</p>
                 {% endif %}
             </div>
+        </div>
+
+        <hr style="margin: 25px 0;">
+
+        <h2>アクセス履歴カレンダー</h2>
+        <div class="calendar-container">
+            <div class="calendar-header">
+                <form action="{{ url_for('index') }}" method="GET" style="display:inline-block;">
+                    <input type="hidden" name="calendar_year" value="{{ calendar_year }}">
+                    <input type="hidden" name="calendar_month" value="{{ calendar_month - 1 if calendar_month > 1 else 12 }}">
+                    <button type="submit" class="nav-button">&lt; 前の月</button>
+                </form>
+                <h3>{{ calendar_year }}年 {{ calendar_month }}月</h3>
+                <form action="{{ url_for('index') }}" method="GET" style="display:inline-block;">
+                    <input type="hidden" name="calendar_year" value="{{ calendar_year if calendar_month < 12 else calendar_year + 1 }}">
+                    <input type="hidden" name="calendar_month" value="{{ calendar_month + 1 if calendar_month < 12 else 1 }}">
+                    <button type="submit" class="nav-button">次の月 &gt;</button>
+                </form>
+            </div>
+            <table class="calendar-table">
+                <thead>
+                    <tr>
+                        <th>日</th>
+                        <th>月</th>
+                        <th>火</th>
+                        <th>水</th>
+                        <th>木</th>
+                        <th>金</th>
+                        <th>土</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for week in month_calendar %}
+                        <tr>
+                            {% for day in week %}
+                                <td class="
+                                    {% if day.month != calendar_month %}other-month{% endif %}
+                                    {% if day == datetime.now().date() %}today{% endif %}
+                                ">
+                                    <span class="calendar-day-number">{{ day.day }}</span>
+                                    <div class="calendar-users">
+                                        {% if access_summary[day] %}
+                                            {% for user_name in access_summary[day] %}
+                                                <span>{{ user_name }}</span>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
 
         <hr style="margin: 25px 0;">
