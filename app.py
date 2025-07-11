@@ -463,7 +463,7 @@ if __name__ == '__main__':
     reader_thread.start()
 
     try:
-        app.run(host='0.0.0.0', port=5000, debug=true)
+        app.run(host='0.0.0.0', port=5000, debug=False)
     except Exception as e:
         print(f"Flask App Error: {e}")
         if ser and ser.is_open:
