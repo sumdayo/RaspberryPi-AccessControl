@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月間滞在時間ランキング</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        h1, h2 { color: #0056b3; }
+        .container { max-width: 800px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .month-selector { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }
+        .month-selector label { margin-right: 10px; font-weight: bold; }
+        .month-selector select { padding: 5px; border-radius: 4px; border: 1px solid #ddd; margin-right: 10px; }
+        .month-selector button { padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .month-selector button:hover { background-color: #0056b3; }
+        .back-link, .nav-link { display: block; margin-top: 20px; text-align: center; }
+        .back-link a, .nav-link a { color: #007bff; text-decoration: none; margin: 0 10px; }
+        .back-link a:hover, .nav-link a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>月間滞在時間ランキング</h1>
+
+        <div class="month-selector">
+            <form action="{{ url_for('show_ranking') }}" method="GET">
+                <label for="year">年:</label>
+                <select id="year" name="year">
+                    {% for y in range(datetime.now().year - 2, datetime.now().year + 1) %}
+                        <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+                <label for="month">月:</label>
+                <select id="month" name="month">
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == selected_month %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">表示</button>
+            </form>
+        </div>
+
+        {% if ranking %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>順位</th>
+                        <th>ユーザー名</th>
+                        <th>合計滞在時間</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in ranking %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ entry.name }}</td>
+                            <td>{{ entry.formatted_time }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>選択された月には滞在記録がありません。</p>
+        {% endif %}
+
+        <div class="nav-link">
+            <a href="{{ url_for('index') }}">トップページに戻る</a>
+            <a href="{{ url_for('manage_users') }}">ユーザー管理</a>
+        </div>
+    </div>
+</body>
+</html>

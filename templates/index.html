@@ -3,47 +3,208 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>入退室管理システム</title>
-    <meta http-equiv="refresh" content="5"> <style>
+    <title>IPlab入退室ログ</title>
+    <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         h1, h2 { color: #0056b3; }
+        .container { max-width: 900px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .nav-links { text-align: center; margin-bottom: 20px; }
+        .nav-links a { display: inline-block; padding: 10px 15px; margin: 0 5px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }
+        .nav-links a:hover { background-color: #0056b3; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
-        .status-入室 { color: green; font-weight: bold; }
-        .status-退室 { color: red; font-weight: bold; }
-        .nav-links { margin-bottom: 20px; }
-        .nav-links a { margin-right: 15px; text-decoration: none; color: #007bff; font-weight: bold; }
-        .nav-links a:hover { text-decoration: underline; }
+        .alert { padding: 10px; margin-bottom: 10px; border-radius: 4px; }
+        .alert.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert.danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        /* ランキング表示用スタイル */
+        .ranking-tabs { display: flex; justify-content: center; margin-bottom: 15px; }
+        .ranking-tabs button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            border: 1px solid #007bff;
+            border-radius: 5px;
+            background-color: #f0f8ff;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .ranking-tabs button.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .ranking-tabs button:hover:not(.active) {
+            background-color: #e6f2ff;
+        }
+        .ranking-content { border: 1px solid #eee; padding: 15px; border-radius: 8px; background-color: #f9f9f9; }
+        .ranking-pane { display: none; } /* デフォルトで非表示 */
+        .ranking-pane.active { display: block; } /* アクティブなものだけ表示 */
+
+        /* 順位の色付け */
+        .rank-1 { background-color: #ffd700; font-weight: bold; } /* Gold */
+        .rank-2 { background-color: #c0c0c0; font-weight: bold; } /* Silver */
+        .rank-3 { background-color: #cd7f32; font-weight: bold; } /* Bronze */
+        .ranking-table th, .ranking-table td { text-align: center; } /* ランキングテーブルのテキストを中央揃え */
+        .ranking-table td:first-child { font-weight: bold; } /* 順位の数字を太字に */
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>入退室管理システム</h1>
+        <h1>IPlab入退室ログ</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flashes">
+                    {% for category, message in messages %}
+                        <div class="alert {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <div class="nav-links">
-            <a href="/">入退室履歴</a>
-            <a href="/users">ユーザー管理</a>
+            <a href="{{ url_for('manage_users') }}">ユーザー管理</a>
+            <a href="{{ url_for('show_ranking') }}">全ランキングページ</a> <!-- 既存のランキングページへのリンク -->
         </div>
+
+        <hr style="margin: 25px 0;">
+
+        <h2>滞在時間ランキング</h2>
+        <div class="ranking-tabs">
+            <button class="tab-button active" onclick="showRanking('monthly', this)">今月の滞在時間 ({{ current_year }}年{{ current_month }}月)</button>
+            <button class="tab-button" onclick="showRanking('weekly', this)">今週の滞在時間</button>
+            <button class="tab-button" onclick="showRanking('total', this)">今までの合計滞在時間</button>
+        </div>
+
+        <div class="ranking-content">
+            <div id="monthly-ranking" class="ranking-pane active">
+                <h3>今月の滞在時間ランキング</h3>
+                {% if monthly_ranking %}
+                    <table class="ranking-table">
+                        <thead>
+                            <tr>
+                                <th>順位</th>
+                                <th>ユーザー名</th>
+                                <th>滞在時間</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in monthly_ranking %}
+                                <tr class="{% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% endif %}">
+                                    <td>{{ loop.index }}</td>
+                                    <td>{{ entry.name }}</td>
+                                    <td>{{ entry.formatted_time }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>今月の滞在記録はありません。</p>
+                {% endif %}
+            </div>
+
+            <div id="weekly-ranking" class="ranking-pane">
+                <h3>今週の滞在時間ランキング</h3>
+                {% if weekly_ranking %}
+                    <table class="ranking-table">
+                        <thead>
+                            <tr>
+                                <th>順位</th>
+                                <th>ユーザー名</th>
+                                <th>滞在時間</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in weekly_ranking %}
+                                <tr class="{% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% endif %}">
+                                    <td>{{ loop.index }}</td>
+                                    <td>{{ entry.name }}</td>
+                                    <td>{{ entry.formatted_time }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>今週の滞在記録はありません。</p>
+                {% endif %}
+            </div>
+
+            <div id="total-ranking" class="ranking-pane">
+                <h3>今までの合計滞在時間ランキング</h3>
+                {% if total_ranking %}
+                    <table class="ranking-table">
+                        <thead>
+                            <tr>
+                                <th>順位</th>
+                                <th>ユーザー名</th>
+                                <th>滞在時間</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in total_ranking %}
+                                <tr class="{% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% endif %}">
+                                    <td>{{ loop.index }}</td>
+                                    <td>{{ entry.name }}</td>
+                                    <td>{{ entry.formatted_time }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p>今までの滞在記録はありません。</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <hr style="margin: 25px 0;">
+
         <h2>最新の入退室履歴</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>日時</th>
-                    <th>ユーザー名</th>
-                    <th>ステータス</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for log in logs %}
-                <tr>
-                    <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td>{{ log.user.name }}</td>
-                    <td class="status-{{ log.status }}">{{ log.status }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        {% if logs %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>ユーザー名</th>
+                        <th>時刻</th>
+                        <th>ステータス</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                        <tr>
+                            <td>{{ log.user.name }}</td>
+                            <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>{{ log.status }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>入退室履歴はありません。</p>
+        {% endif %}
     </div>
+
+    <script>
+        function showRanking(rankingType, clickedButton) {
+            // 全てのランキングペインを非表示にする
+            const panes = document.querySelectorAll('.ranking-pane');
+            panes.forEach(pane => {
+                pane.classList.remove('active');
+            });
+
+            // クリックされたランキングタイプに対応するペインを表示する
+            document.getElementById(`${rankingType}-ranking`).classList.add('active');
+
+            // 全てのタブボタンのアクティブ状態を解除
+            const buttons = document.querySelectorAll('.tab-button');
+            buttons.forEach(button => {
+                button.classList.remove('active');
+            });
+
+            // クリックされたボタンをアクティブにする
+            clickedButton.classList.add('active');
+        }
+    </script>
 </body>
 </html>
