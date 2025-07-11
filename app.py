@@ -1,8 +1,12 @@
 import serial
 import time
+import requests
+import json
+import datetime # 日時情報を取得するために必要
 from flask import Flask, render_template, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime # ここでdatetimeクラスをインポートしている
+
 from smartcard.System import readers
 from smartcard.util import toHexString
 import threading
@@ -113,6 +117,62 @@ def send_to_arduino(line1, line2):
     else:
         print("Arduino Not Connected. Cannot send data. (Please check serial port setup)")
 
+# --- Discord ウェブフックURLを設定 ---
+# あなたが提供したDiscordウェブフックURLをここに設定します
+DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1393251548645167265/Z2lwsYQtL4J0rim60RyuORA2Kq30FN1Uap7NkC4jxDTHLteSm1CXwW4JsyqBEaJQd1x2" 
+
+def send_discord_notification(username, event_type, success=True):
+    """
+    Discord に入退室通知を送信する関数。
+    :param username: アクセスを試みたユーザー名
+    :param event_type: '入室' または '退室'
+    :param success: アクセスが成功したか否か (True/False)
+    """
+    if not DISCORD_WEBHOOK_URL:
+        print("Discord ウェブフックURLが設定されていません。通知はスキップされます。")
+        return
+
+    # 修正: datetime.datetime.now() から datetime.now() に変更
+    current_time = datetime.now().strftime("%Y年%m月%d日 %H時%M分%S秒")
+
+    if success:
+        message_content = f"✅ {current_time}: **{username}** が **{event_type}** しました。"
+        color = 65280  # 緑色 (成功)
+    else:
+        message_content = f"❌ {current_time}: **{username}** が **{event_type}** に失敗しました。"
+        color = 16711680 # 赤色 (失敗)
+
+    # Discord Embed の形式で送信（より見やすくするため）
+    payload = {
+        "embeds": [
+            {
+                "title": f"アクセスイベント: {event_type}",
+                "description": message_content,
+                "color": color,
+                "fields": [
+                    {"name": "ユーザー名", "value": username, "inline": True},
+                    {"name": "時刻", "value": current_time, "inline": True},
+                    {"name": "結果", "value": "成功" if success else "失敗", "inline": True}
+                ],
+                "footer": {
+                    "text": "Raspberry Pi アクセス制御システム"
+                },
+                # 修正: datetime.datetime.utcnow().isoformat() から datetime.utcnow().isoformat() に変更
+                "timestamp": datetime.utcnow().isoformat() + "Z" # UTC時間でISOフォーマット
+            }
+        ]
+    }
+
+    headers = {"Content-Type": "application/json"}
+    try:
+        response = requests.post(DISCORD_WEBHOOK_URL, data=json.dumps(payload), headers=headers)
+        response.raise_for_status() # HTTPエラーが発生した場合に例外を発生させる
+        print(f"Discord 通知を送信しました: {message_content}")
+    except requests.exceptions.RequestException as e:
+        print(f"Discord 通知の送信中にエラーが発生しました: {e}")
+        print(f"レスポンス内容: {response.text if 'response' in locals() else 'N/A'}")
+
+
 # --- カード読み取りと処理のメインループ（別スレッドで実行） ---
 def card_reading_loop():
     send_to_arduino("System Starting", "") # 起動メッセージ
@@ -127,7 +187,7 @@ def card_reading_loop():
                 if user:
                     # ユーザーが見つかった場合、入退室を切り替える
                     last_log = AccessLog.query.filter_by(user_id=user.id)\
-                                .order_by(AccessLog.timestamp.desc()).first()
+                                 .order_by(AccessLog.timestamp.desc()).first()
                     
                     if last_log and last_log.status == '入室':
                         new_status = '退室'
@@ -140,10 +200,14 @@ def card_reading_loop():
 
                     print(f"Access recorded: {user.name} - {new_status}")
                     send_to_arduino(user.name, new_status)
+                    # --- Discord通知をここに追加 (成功時) ---
+                    send_discord_notification(user.name, new_status, success=True)
                 else:
                     # 未登録ユーザー
                     print(f"Unknown card detected! IDm: {idm}")
                     send_to_arduino("Unknown Card", "Please register")
+                    # --- Discord通知をここに追加 (未登録ユーザー時) ---
+                    send_discord_notification("不明なユーザー", "アクセス試行", success=False)
             
             time.sleep(5) # LCD表示時間 + 冷却期間 (連続読み取り防止)
             send_to_arduino("Ready", "Place your card") # 次の読み取りを促すメッセージ
