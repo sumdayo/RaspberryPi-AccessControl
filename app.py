@@ -8,13 +8,13 @@ import math
 
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, timedelta, date # dateを追加
-from collections import defaultdict # defaultdictを追加
+from datetime import datetime, timedelta, date
+from collections import defaultdict
 
 from smartcard.System import readers
 from smartcard.util import toHexString
 import threading
-import calendar # カレンダー生成のために追加
+import calendar
 
 
 # --- Flaskアプリケーションの設定 ---
@@ -110,7 +110,7 @@ def send_to_arduino(line1, line2):
         print("Arduino Not Connected. Cannot send data. (Please check serial port setup)")
 
 # --- Discord ウェブフックURLを設定 ---
-DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1393251548645167265/Z2lwsYQtL4J0rim60RyuORA2Kq30FN1Uap7NkC4jxDTHLteSm1CXwW4JsyqBEaJQd1x2" 
+DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1393286247258128404/XjqQlaaFHl3Xfa3zLSuMpk97UR_zlX1uYRzBu3XBiyQPbpOH-exNAY98IN44CCd9oFew"
 
 def send_discord_notification(username, event_type, success=True, details=None):
     if not DISCORD_WEBHOOK_URL:
@@ -362,6 +362,9 @@ def index():
     calendar_year = request.args.get('calendar_year', type=int, default=current_year)
     calendar_month = request.args.get('calendar_month', type=int, default=current_month)
 
+    # デバッグ用: テンプレートに渡す値を確認
+    print(f"DEBUG: Rendering index.html with calendar_year={calendar_year}, calendar_month={calendar_month}")
+
     # カレンダーデータ
     cal = calendar.Calendar(firstweekday=calendar.SUNDAY) # 日曜日始まり
     month_calendar = cal.monthdatescalendar(calendar_year, calendar_month)
@@ -428,7 +431,12 @@ def manage_users():
                         flash('エラー: ユーザーが見つかりませんでした。', 'danger')
             else:
                 flash('エラー: パスワードが間違っています。', 'danger')
+        # POSTリクエストのどのパスでも最終的にリダイレクトするように変更
         return redirect(url_for('manage_users'))
+
+    # GETリクエストの場合
+    users = User.query.all()
+    return render_template('users.html', users=users)
 
 @app.route('/users/edit/<int:user_id>', methods=['GET', 'POST'])
 def edit_user(user_id):
