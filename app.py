@@ -1,4 +1,3 @@
-import serial
 import time
 import requests
 import json
@@ -16,6 +15,11 @@ from smartcard.util import toHexString
 import threading
 import calendar
 
+import openpyxl
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+
+import zipfile # `BadZipFile`をキャッチするためにimportを追加
 
 # --- Flaskアプリケーションの設定 ---
 app = Flask(__name__)
@@ -23,9 +27,9 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///access_log.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'your_super_secret_key_here' # 本番環境ではより複雑なキーにすること
 
-# --- 削除操作用のパスワード設定 ---
-# !!! 重要: 本番環境ではこのパスワードを環境変数などから読み込むべきです !!!
-DELETE_PASSWORD = "your_secure_delete_password" # ここを実際のパスワードに設定してください
+# --- 削除と修正操作用のパスワード設定 ---
+DELETE_PASSWORD = "DELETE"
+EDIT_PASSWORD = "EDIT"
 
 
 db = SQLAlchemy(app)
@@ -49,23 +53,6 @@ class AccessLog(db.Model):
 
     def __repr__(self):
         return f'<AccessLog {self.user.name} {self.status} at {self.timestamp}>'
-
-# --- Arduinoへのシリアル通信設定 ---
-ARDUINO_PORT = '/dev/ttyACM0'
-BAUD_RATE = 9600
-
-ser = None 
-
-def init_serial_connection():
-    global ser
-    try:
-        ser = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
-        time.sleep(2)
-        print(f"Serial: Connected to Arduino on {ARDUINO_PORT}")
-        send_to_arduino("System Ready", "Place your card")
-    except serial.SerialException as e:
-        print(f"Serial Error: Could not connect to Arduino on {ARDUINO_PORT}. {e}")
-        ser = None
 
 def read_felica_card_idm():
     try:
@@ -95,19 +82,6 @@ def read_felica_card_idm():
 
     except Exception as e:
         return None
-
-def send_to_arduino(line1, line2):
-    if ser and ser.is_open:
-        data_to_send = f"{line1}\n{line2}\n"
-        try:
-            ser.write(data_to_send.encode('utf-8'))
-            print(f"Arduino Sent: '{data_to_send.strip()}'")
-        except serial.SerialException as e:
-            print(f"Arduino Send Error: {e}. Attempting to reconnect...")
-            ser.close()
-            init_serial_connection()
-    else:
-        print("Arduino Not Connected. Cannot send data. (Please check serial port setup)")
 
 # --- Discord ウェブフックURLを設定 ---
 DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1393286247258128404/XjqQlaaFHl3Xfa3zLSuMpk97UR_zlX1uYRzBu3XBiyQPbpOH-exNAY98IN44CCd9oFew"
@@ -191,10 +165,6 @@ def send_discord_notification(username, event_type, success=True, details=None):
 
 # --- カード読み取りと処理のメインループ（別スレッドで実行） ---
 def card_reading_loop():
-    send_to_arduino("System Starting", "")
-    time.sleep(1)
-    send_to_arduino("Ready", "Place your card")
-
     while True:
         idm = read_felica_card_idm()
         if idm:
@@ -214,15 +184,12 @@ def card_reading_loop():
                     db.session.commit()
 
                     print(f"Access recorded: {user.name} - {new_status}")
-                    send_to_arduino(user.name, new_status)
                     send_discord_notification(user.name, new_status, success=True)
                 else:
                     print(f"Unknown card detected! IDm: {idm}")
-                    send_to_arduino("Unknown Card", "Please register")
                     send_discord_notification("不明なユーザー", "アクセス試行", success=False)
             
             time.sleep(5)
-            send_to_arduino("Ready", "Place your card")
         time.sleep(0.5)
 
 # --- 滞在時間計算ヘルパー関数 ---
@@ -498,10 +465,196 @@ def show_ranking():
     return render_template('ranking.html', ranking=ranking, selected_year=year, selected_month=month, datetime=datetime)
 
 
+# --- Excelファイルにログを記録する関数 ---
+def update_excel_log():
+    excel_file_path = "access_logs.xlsx"
+
+    # データベースから全期間のログを取得
+    with app.app_context():
+        all_logs = AccessLog.query.order_by(AccessLog.timestamp).all()
+        all_users = User.query.all()
+    
+    # ユーザー名とIDの紐づけ
+    user_names = {user.id: user.name for user in all_users}
+
+    # ユーザーごと、日ごとのセッションデータを集計
+    user_daily_sessions = defaultdict(lambda: defaultdict(list))
+    for log in all_logs:
+        log_date = log.timestamp.date()
+        user_daily_sessions[log.user_id][log_date].append(log)
+
+    # Excelブックを新規作成
+    workbook = Workbook()
+    
+    # ユーザーごとにシートを作成
+    for user_id, daily_data in user_daily_sessions.items():
+        user_name = user_names.get(user_id, f"不明なユーザー({user_id})")
+        
+        # シート名に使用できない文字を置き換える
+        safe_sheet_name = user_name.replace('[', '').replace(']', '').replace(':', '').replace('/', '').replace('\\', '').replace('?', '').replace('*', '')
+        
+        # 既に存在しているデフォルトのシートを削除
+        if "Sheet" in workbook.sheetnames:
+            workbook.remove(workbook["Sheet"])
+
+        # 新しいシートを作成
+        sheet = workbook.create_sheet(title=safe_sheet_name)
+        
+        # ヘッダー行を書き込む
+        sheet.append(["日付", "入室/退室記録", "合計滞在時間"])
+
+        # 全期間のログから最初と最後の月を取得
+        if all_logs:
+            start_month = all_logs[0].timestamp.replace(day=1)
+            end_month = all_logs[-1].timestamp.replace(day=1)
+        else:
+            # ログがない場合は今月を使用
+            today = datetime.now()
+            start_month = today.replace(day=1)
+            end_month = today.replace(day=1)
+        
+        current_month = start_month
+        while current_month <= end_month:
+            # 月の最初の日と最後の日を取得
+            first_day = current_month.date()
+            _, last_day_of_month = calendar.monthrange(current_month.year, current_month.month)
+            last_day = current_month.replace(day=last_day_of_month).date()
+
+            # 月ごとのデータを書き込む
+            sheet.append([f"--- {current_month.strftime('%Y年%m月')} ---", "", ""])
+            
+            # 1日から月末までループ
+            for single_day_num in range(1, last_day_of_month + 1):
+                current_day = current_month.replace(day=single_day_num).date()
+
+                if current_day in daily_data:
+                    # アクセスがあった日の処理
+                    logs_on_day = daily_data[current_day]
+                    in_out_times = []
+                    total_stay_duration = timedelta(0)
+                    entry_time = None
+                    
+                    for log in logs_on_day:
+                        if log.status == '入室':
+                            entry_time = log.timestamp
+                        elif log.status == '退室' and entry_time:
+                            duration = log.timestamp - entry_time
+                            total_stay_duration += duration
+                            in_out_times.append(f"{entry_time.strftime('%H:%M')}-{log.timestamp.strftime('%H:%M')}")
+                            entry_time = None
+                    
+                    if entry_time:
+                        in_out_times.append(f"{entry_time.strftime('%H:%M')}-未退室")
+                        total_stay_duration += datetime.now() - entry_time
+                    
+                    # Excelの行データを作成
+                    in_out_string = ", ".join(in_out_times)
+                    total_seconds = total_stay_duration.total_seconds()
+                    hours = int(total_seconds // 3600)
+                    minutes = int((total_seconds % 3600) // 60)
+                    seconds = int(total_seconds % 60)
+                    formatted_duration = f"{hours:02}:{minutes:02}:{seconds:02}"
+                    
+                    sheet.append([current_day.strftime('%Y-%m-%d'), in_out_string, formatted_duration])
+                else:
+                    # アクセスがなかった日の処理
+                    sheet.append([current_day.strftime('%Y-%m-%d'), "", ""])
+
+            # 次の月に進む
+            if current_month.month == 12:
+                current_month = current_month.replace(year=current_month.year + 1, month=1)
+            else:
+                current_month = current_month.replace(month=current_month.month + 1)
+
+    # 最終的にExcelファイルを保存
+    workbook.save(excel_file_path)
+    print("Excelログを更新しました。")
+
+
+# --- 定期実行タスク ---
+last_auto_sign_out_date = None
+
+def scheduled_system_notifications():
+    """
+    Excelログの更新と自動退室処理を定期的に実行するスレッド
+    """
+    global last_auto_sign_out_date
+    while True:
+        now = datetime.now()
+        
+        # --- 毎日23:59に自動退室処理を実行 ---
+        if now.hour == 23 and now.minute == 59 and now.date() != last_auto_sign_out_date:
+            with app.app_context():
+                auto_sign_out()
+            last_auto_sign_out_date = now.date()
+
+        # --- Excelログの更新 ---
+        # この処理も app_context 内で行う
+        with app.app_context():
+            update_excel_log()
+            
+        # 1分待機
+        time.sleep(1 * 60)
+        
+
+def auto_sign_out():
+    """
+    退室忘れユーザーを自動的に退室させる関数
+    毎日 23:59 に実行することを想定
+    """
+# --- auto_sign_out 関数を修正 ---
+def auto_sign_out():
+    """
+    退室忘れユーザーを自動的に退室させる関数
+    毎日 23:59 に実行することを想定
+    """
+    # この関数全体を `with app.app_context():` で囲む必要はない
+    # なぜなら、呼び出し元で既に囲まれているから。
+    subquery = db.session.query(
+        AccessLog.user_id,
+        db.func.max(AccessLog.timestamp).label('last_timestamp')
+    ).group_by(AccessLog.user_id).subquery()
+
+    users_to_sign_out = db.session.query(User).join(AccessLog).filter(
+        AccessLog.user_id == subquery.c.user_id,
+        AccessLog.timestamp == subquery.c.last_timestamp,
+        AccessLog.status == '入室'
+    ).all()
+
+
+    if users_to_sign_out:
+        now = datetime.now()
+        # 誰かがいた場合のみ通知
+        print(f"退室忘れのユーザーが{len(users_to_sign_out)}人いました。自動退室を記録します。")
+
+        for user in users_to_sign_out:
+            print(f"ユーザー '{user.name}' の自動退室を記録中...")
+
+            # 新しい退室ログを作成
+            log_entry = AccessLog(user_id=user.id, status='退室', timestamp=now)
+            db.session.add(log_entry)
+            db.session.commit()
+            
+            # Discordに個別の通知を送信
+            send_discord_message(
+                DISCORD_SYSTEM_MONITOR_WEBHOOK_URL,
+                f"🚪 {user.name} さんの退室を、23:59に自動的に記録しました。",
+                username="自動退室Bot"
+            )
+        # すべての処理が完了した後に、まとめて完了通知を送ることもできます
+        # send_discord_message(
+        #     DISCORD_SYSTEM_MONITOR_WEBHOOK_URL,
+        #     f"✅ {len(users_to_sign_out)}人の自動退室処理が完了しました。",
+        #     username="自動退室Bot"
+        # )
+    else:
+        # 退室忘れのユーザーがいなかった場合は何も通知しない
+        print("退室忘れのユーザーはいませんでした。")
+
+
+
 # --- アプリケーション起動時の処理 ---
 if __name__ == '__main__':
-    init_serial_connection()
-
     with app.app_context():
         db.create_all()
 
@@ -514,11 +667,12 @@ if __name__ == '__main__':
 
     reader_thread = threading.Thread(target=card_reading_loop, daemon=True)
     reader_thread.start()
+    
+    excel_thread = threading.Thread(target=scheduled_system_notifications, daemon=True)
+    excel_thread.start()
 
     try:
         app.run(host='0.0.0.0', port=5000, debug=False)
     except Exception as e:
         print(f"Flask App Error: {e}")
-        if ser and ser.is_open:
-            ser.close()
         sys.exit(1)
