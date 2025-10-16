@@ -17,7 +17,7 @@ from smartcard.System import readers
 from smartcard.util import toHexString
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
-from dotenv import load_dotenv # 環境変数の読み込み用に追加した
+from dotenv import load_dotenv
 
 load_dotenv() # .envファイルから環境変数を読み込む
 
@@ -27,13 +27,10 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("FLASK_SECRET_KEY", "default_insecure_fallback") 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///access_log.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# --- 削除と修正操作用のパスワード設定 ---
 EDIT_PASSWORD = os.getenv("APP_EDIT_PASSWORD")
 DELETE_PASSWORD = os.getenv("APP_DELETE_PASSWORD")
 
 if not os.getenv("FLASK_SECRET_KEY") or not EDIT_PASSWORD:
-    # 秘密鍵または認証パスワードがない場合は起動させない、より安全なロジック
     print("Error: 環境変数が設定されていません。アプリを停止します。")
     import sys
     sys.exit(1)
@@ -64,7 +61,7 @@ def read_felica_card_idm():
     try:
         available_readers = readers()
         if not available_readers:
-            print("NFC Error: No smart card readers found. Is PaSoRi connected and pcscd running?")
+            print("NFC Error: No card readers found. Is PaSoRi connected and pcscd running?")
             return None
 
         pasori_reader = next((r for r in available_readers if 'PaSoRi' in str(r) or 'FeliCa' in str(r)), None)
@@ -90,55 +87,62 @@ def read_felica_card_idm():
         return None
 
 # --- Discord ウェブフックURLを設定 ---
-DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1393286247258128404/XjqQlaaFHl3Xfa3zLSuMpk97UR_zlX1uYRzBu3XBiyQPbpOH-exNAY98IN44CCd9oFew"
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 def send_discord_notification(username, event_type, success=True, details=None):
     if not DISCORD_WEBHOOK_URL:
         print("Discord ウェブフックURLが設定されていません。通知はスキップされます。")
         return
 
-    current_time = datetime.now().strftime("%Y年%m月%d日 %H時%M分%S秒")
+    # DiscordのEmbedの色 (Color) を定義
+    COLOR_ENTRY = 3066993   # 緑系の強調色 (入室)
+    COLOR_EXIT = 15158332  # 赤系の強調色 (退室)
+    COLOR_ALERT = 16711680 # 赤 (エラー/失敗)
+    COLOR_MANAGEMENT = 7829367 # グレー (管理操作)
+
+    # 協調したい情報のために時刻を簡略化
+    current_time_short = datetime.now().strftime("%H:%M:%S") 
+    
     title = ""
     description = ""
     color = 0
 
     if event_type == '入室':
-        title = "アクセスイベント: 入室"
-        description = f"✅ {current_time}: **{username}** が **入室** しました。"
-        color = 65280
+        # 修正: 簡潔化と強調
+        title = "入室通知"
+        description = f"✅ **{username}** が **入室** しました。"
+        color = COLOR_ENTRY
     elif event_type == '退室':
-        title = "アクセスイベント: 退室"
-        description = f"🚪 {current_time}: **{username}** が **退室** しました。"
-        color = 3447003
+        # 修正: 簡潔化と強調
+        title = "退室通知"
+        description = f"🚪 **{username}** が **退室** しました。"
+        color = COLOR_EXIT
     elif event_type == 'アクセス試行':
-        title = "アクセスイベント: アクセス失敗"
-        description = f"❌ {current_time}: **{username}** が **アクセス** に失敗しました。"
-        color = 16711680
+        # 修正: 簡潔化
+        title = "アクセス失敗"
+        description = f"❌ **{username}** のカードは登録されていません。"
+        color = COLOR_ALERT
     elif event_type == 'ユーザー追加':
-        title = "ユーザー管理: 新規ユーザー追加"
-        description = f"➕ {current_time}: 新しいユーザー **{username}** が追加されました。\nIDm: `{details.get('idm', 'N/A')}`"
-        color = 65280
+        # 管理操作は簡潔化するが、必要な情報はFieldsに残す
+        title = "管理操作: ユーザー追加"
+        description = f"➕ 新しいユーザー **{username}** が追加されました。"
+        color = COLOR_MANAGEMENT
     elif event_type == 'ユーザー更新':
-        title = "ユーザー管理: ユーザー情報更新"
-        description = f"✏️ {current_time}: ユーザー **{username}** の情報が更新されました。"
-        if details:
-            if 'old_name' in details and 'new_name' in details and details['old_name'] != details['new_name']:
-                description += f"\n名前: `{details['old_name']}` -> `{details['new_name']}`"
-            if 'old_idm' in details and 'new_idm' in details and details['old_idm'] != details['new_idm']:
-                description += f"\nIDm: `{details['old_idm']}` -> `{details['new_idm']}`"
-        color = 16776960
+        title = "管理操作: ユーザー情報更新"
+        description = f"✏️ ユーザー **{username}** の情報が更新されました。"
+        color = COLOR_MANAGEMENT
     elif event_type == 'ユーザー削除':
-        title = "ユーザー管理: ユーザー削除"
-        description = f"🗑️ {current_time}: ユーザー **{username}** が削除されました。"
-        color = 16711680
+        title = "管理操作: ユーザー削除"
+        description = f"🗑️ ユーザー **{username}** が削除されました。"
+        color = COLOR_ALERT
     elif event_type == 'ログ削除':
-        title = "ユーザー管理: ログ削除"
-        description = f"🧹 {current_time}: ユーザー **{username}** の入退室ログがすべて削除されました。"
-        color = 7829367
+        title = "管理操作: ログ削除"
+        description = f"🧹 ユーザー **{username}** のログがすべて削除されました。"
+        color = COLOR_MANAGEMENT
     else:
         title = "不明なイベント"
-        description = f"{current_time}: 不明なイベントが発生しました。"
-        color = 7829367
+        description = "イベントが発生しましたが、内容が不明です。"
+        color = COLOR_ALERT
 
     payload = {
         "embeds": [
@@ -147,9 +151,9 @@ def send_discord_notification(username, event_type, success=True, details=None):
                 "description": description,
                 "color": color,
                 "fields": [
-                    {"name": "ユーザー名", "value": username, "inline": True},
-                    {"name": "時刻", "value": current_time, "inline": True},
-                    {"name": "結果", "value": "成功" if success else "失敗", "inline": True}
+                    # 必須項目: 時刻と日付のみに絞る
+                    {"name": "時刻", "value": current_time_short, "inline": True},
+                    {"name": "日付", "value": datetime.now().strftime("%Y-%m-%d"), "inline": True},
                 ],
                 "footer": {
                     "text": "Raspberry Pi アクセス制御システム"
@@ -167,7 +171,6 @@ def send_discord_notification(username, event_type, success=True, details=None):
     except requests.exceptions.RequestException as e:
         print(f"Discord 通知の送信中にエラーが発生しました: {e}")
         print(f"レスポンス内容: {response.text if 'response' in locals() else 'N/A'}")
-
 
 # --- カード読み取りと処理のメインループ（別スレッドで実行） ---
 def card_reading_loop():
