@@ -4,3 +4,4 @@ access_log.db
 venv/
 *.pyc
 __pycache__/
+*.xlsx
