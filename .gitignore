@@ -1,7 +1,10 @@
-.env
-access_log.db
-*.db
-venv/
-*.pyc
-__pycache__/
+# Excel ファイルの除外
 *.xlsx
+*.xls
+*.csv
+*.db
+
+# OSや仮想環境関連の除外 (既存の内容も保持推奨)
+venv/
+__pycache__/
+.env
