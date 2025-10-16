@@ -4,33 +4,39 @@ import json
 import os
 import sys
 import math
+import threading
+import calendar
+import openpyxl
+import zipfile # `BadZipFile` エラー対策
 
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, date
 from collections import defaultdict
-
 from smartcard.System import readers
 from smartcard.util import toHexString
-import threading
-import calendar
-
-import openpyxl
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
+from dotenv import load_dotenv # 環境変数の読み込み用に追加した
 
-import zipfile # `BadZipFile`をキャッチするためにimportを追加
+load_dotenv() # .envファイルから環境変数を読み込む
 
-# --- Flaskアプリケーションの設定 ---
+# -- Flaskアプリケーションの設定 --
 app = Flask(__name__)
+# FlaskのSECRET_KEYを環境変数から読み込み
+app.config['SECRET_KEY'] = os.getenv("FLASK_SECRET_KEY", "default_insecure_fallback") 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///access_log.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'your_super_secret_key_here' # 本番環境ではより複雑なキーにすること
 
 # --- 削除と修正操作用のパスワード設定 ---
-DELETE_PASSWORD = "DELETE"
-EDIT_PASSWORD = "EDIT"
+EDIT_PASSWORD = os.getenv("APP_EDIT_PASSWORD")
+DELETE_PASSWORD = os.getenv("APP_DELETE_PASSWORD")
 
+if not os.getenv("FLASK_SECRET_KEY") or not EDIT_PASSWORD:
+    # 秘密鍵または認証パスワードがない場合は起動させない、より安全なロジック
+    print("Error: 環境変数が設定されていません。アプリを停止します。")
+    import sys
+    sys.exit(1)
 
 db = SQLAlchemy(app)
 
