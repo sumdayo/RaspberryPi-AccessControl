@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv
+venv/
+
+# Flask
+instance/
+*.sqlite
+*.db
+
+# データファイル
+*.xlsx
+*.xls
+access_log*
+
+# LibreOfficeのロックファイル
+.~lock.*
+
+# macOS
+.DS_Store
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+
+# 環境変数
+.env
+*.env
