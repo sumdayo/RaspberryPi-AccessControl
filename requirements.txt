@@ -1,0 +1,8 @@
+Flask
+pyserial
+psycopg2-binary  # Or mysql-connector-python if you chose MySQL for Cloud SQL
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+requests
+psutil
